@@ -6,4 +6,23 @@ http://www.lg.com/lgecs.downloadFile.ldwf?OPENSOURCE_FILE_NAME=LGP880%28X3%29_An
 Run as root on phone:
 echo 1-0036 >/sys/bus/i2c/drivers/lm3533_bl/unbind
 insmod lm3533_bl_custom.ko
-echo 1-0036 >/sys/bus/i2c/drivers/lm3533_bl_custom/bind
+#echo 1-0036 >/sys/bus/i2c/drivers/lm3533_bl_custom/bind
+
+These sysfs files should be owned by 1000:1001 (system:radio).
+
+Change (fine) brightness via (found in lights.x3.so):
+/sys/class/leds/lcd-backlight/brightness
+0..255
+
+Change (coarse) brightness via:
+/sys/devices/platform/tegra-i2c.1/i2c-1/1-0036/lm3533_bl_maxcurrent
+0..19
+
+According to the datasheet it can go up to 31 (29.8 mA), but there is are risks
+to going higher than the default of 19 (20.2 mA).
+I can think of backlight burning out (unlikely), overheating of LCD or other
+components, etc.
+You can disable the check in the source code if you dare.
+Please report back with your results. :)
+
+This module was primarily intended for LOWERING the brightness for use in bed.

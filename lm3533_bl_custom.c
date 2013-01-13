@@ -19,7 +19,8 @@
 #include <linux/gpio.h>
 #include <linux/leds.h>
 
-#define I2C_BL_NAME	"lm3533_bl_custom"
+#define I2C_BL_NAME	"lm3533_bl"
+#define DRIVER_NAME	"lm3533_bl_custom"
 
 #define BL_ON		1
 #define BL_OFF		0
@@ -27,6 +28,10 @@
 #define LM3533_BL_MAX_BRIGHTNESS	0xFF
 #define LM3533_BL_DEFAULT_BRIGHTNESS	0x33
 #define LM3533_BL_MIN_BRIGHTNESS	0x02
+
+#define LM3533_BL_MAX_MAXCURRENT	19
+#define LM3533_BL_DEFAULT_MAXCURRENT	19
+#define LM3533_BL_MIN_MAXCURRENT	0
 
 #define CONFIG_LM3533_LEDS_CLASS
 #define LGE_LM3533_USED_I2C_SMBUS
@@ -95,6 +100,7 @@ struct lm3533_device {
 	int		bl_status;
 	struct mutex	bl_mutex;
 	struct mutex	bl_mutex_saved;
+	int		cur_maxcurrent;
 };
 
 struct lm3533_device *lm3533dev;
@@ -193,7 +199,7 @@ static void lm3533_backlight_on(struct i2c_client *client, int level)
 
 	lm3533_bl_write_reg(client, 0x14, 0x0); //PWM input is disabled for CABC
 	lm3533_bl_write_reg(client, 0x1A, 0x2); //Linear & Control Bank A is configured for register Current control
-	lm3533_bl_write_reg(client, 0x1F, 0x13); //Full-Scale Current (20.2mA)
+	lm3533_bl_write_reg(client, 0x1F, dev->cur_maxcurrent); //Full-Scale Current (default 20.2mA)
 	lm3533_bl_write_reg(client, 0x27, 0x1); //Control Bank A is enable
 	lm3533_bl_write_reg(client, 0x2C, 0x0A); //Active High, OVP(24V), Boost Frequency(500 khz)
 
@@ -236,6 +242,25 @@ static void lm3533_lcd_backlight_set_level(struct i2c_client *client, int level)
 		} else {
 			lm3533_backlight_on(client, level);
 		}
+	} else {
+		printk("%s : No i2c client\n", __func__);
+	}
+}
+
+static void lm3533_lcd_backlight_set_maxcurrent(struct i2c_client *client,
+		int level)
+{
+	// Disable this check if you dare.
+	// See README.
+	if (level > LM3533_BL_MAX_MAXCURRENT)
+		level = LM3533_BL_MAX_MAXCURRENT;
+	if (level < LM3533_BL_MIN_MAXCURRENT)
+		level = LM3533_BL_MIN_MAXCURRENT;
+
+	if (client != NULL) {
+		struct lm3533_device *lm3533_dev = i2c_get_clientdata(client);
+		lm3533_bl_write_reg(client, 0x1F, level);
+		lm3533_dev->cur_maxcurrent = level;
 	} else {
 		printk("%s : No i2c client\n", __func__);
 	}
@@ -386,8 +411,48 @@ static ssize_t lm3533_bl_store_on_off(struct device *dev,
 	return count;
 
 }
+
+static ssize_t lm3533_bl_show_maxcurrent(struct device *dev,
+		struct device_attribute *attr,
+		char *buf)
+{
+	int r;
+	struct i2c_client *client = to_i2c_client(dev);
+	struct lm3533_device *lm3533_dev = i2c_get_clientdata(client);
+
+	r = snprintf(buf, PAGE_SIZE,
+			"LCD Max Current is : %d\n",
+			lm3533_dev->cur_maxcurrent);
+
+	return r;
+}
+
+static ssize_t lm3533_bl_store_maxcurrent(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf,
+		size_t count)
+{
+	int level;
+	struct i2c_client *client = to_i2c_client(dev);
+
+	if (!count) {
+		dev_err(&client->dev,
+				"Invalid argument while storing maxcurrent\n");
+		return -EINVAL;
+	}
+
+	level = simple_strtoul(buf, NULL, 10);
+
+	lm3533_lcd_backlight_set_maxcurrent(client, level);
+
+	return count;
+}
+
 DEVICE_ATTR(lm3533_bl_level, 0660, lm3533_bl_show_lvl, lm3533_bl_store_lvl);
-DEVICE_ATTR(lm3533_bl_onoff, 0660, lm3533_bl_show_on_off, lm3533_bl_store_on_off);
+DEVICE_ATTR(lm3533_bl_onoff, 0660, lm3533_bl_show_on_off,
+		lm3533_bl_store_on_off);
+DEVICE_ATTR(lm3533_bl_maxcurrent, 0660, lm3533_bl_show_maxcurrent,
+		lm3533_bl_store_maxcurrent);
 
 #ifdef CONFIG_LM3533_LEDS_CLASS
 
@@ -444,7 +509,7 @@ static struct backlight_ops lm3533_bl_ops = {
 #endif
 
 static int __devinit lm3533_bl_probe(struct i2c_client *i2c_dev,
-			       const struct i2c_device_id *id)
+		const struct i2c_device_id *id)
 {
 	struct lm3533_bl_platform_data *pdata;
 	struct lm3533_device *dev;
@@ -464,13 +529,14 @@ static int __devinit lm3533_bl_probe(struct i2c_client *i2c_dev,
 #ifdef CONFIG_LM3533_LEDS_CLASS
 	dev->client = i2c_dev;
 	dev->hwen_gpio = pdata->hwen_gpio;
-	dev->max_current= pdata->max_current;
-	dev->max_brightness= LM3533_BL_MAX_BRIGHTNESS;
-	dev->min_brightness= pdata->min_brightness;
-	dev->default_brightness= LM3533_BL_DEFAULT_BRIGHTNESS;
-	dev->cur_main_lcd_level= LM3533_BL_DEFAULT_BRIGHTNESS;
-	dev->saved_main_lcd_level= LM3533_BL_DEFAULT_BRIGHTNESS;
+	dev->max_current = pdata->max_current;
+	dev->max_brightness = LM3533_BL_MAX_BRIGHTNESS;
+	dev->min_brightness = pdata->min_brightness;
+	dev->default_brightness = LM3533_BL_DEFAULT_BRIGHTNESS;
+	dev->cur_main_lcd_level = LM3533_BL_DEFAULT_BRIGHTNESS;
+	dev->saved_main_lcd_level = LM3533_BL_DEFAULT_BRIGHTNESS;
 	dev->bl_status = BL_OFF;
+	dev->cur_maxcurrent = LM3533_BL_DEFAULT_MAXCURRENT;
 
 	err = led_classdev_register(&i2c_dev->dev, &lm3533_led_dev);
 	if (err < 0) {
@@ -507,6 +573,12 @@ static int __devinit lm3533_bl_probe(struct i2c_client *i2c_dev,
 		dev_err(&i2c_dev->dev, "device_create_file(onoff) failed\n");
 		goto err_device_create_file_2;
 	}
+	err = device_create_file(&i2c_dev->dev, &dev_attr_lm3533_bl_maxcurrent);
+	if (err < 0) {
+		dev_err(&i2c_dev->dev,
+				"device_create_file(maxcurrent) failed\n");
+		goto err_device_create_file_3;
+	}
 
 	lm3533dev = dev;
 
@@ -516,6 +588,8 @@ static int __devinit lm3533_bl_probe(struct i2c_client *i2c_dev,
 
 	return 0;
 
+err_device_create_file_3:
+	device_remove_file(&i2c_dev->dev, &dev_attr_lm3533_bl_onoff);
 err_device_create_file_2:
 	device_remove_file(&i2c_dev->dev, &dev_attr_lm3533_bl_level);
 err_device_create_file_1:
@@ -537,8 +611,9 @@ static int __devexit lm3533_bl_remove(struct i2c_client *i2c_dev)
 	struct lm3533_device *dev = i2c_get_clientdata(i2c_dev);
 	int gpio = dev->hwen_gpio;
 
- 	device_remove_file(&i2c_dev->dev, &dev_attr_lm3533_bl_level);
+	device_remove_file(&i2c_dev->dev, &dev_attr_lm3533_bl_level);
 	device_remove_file(&i2c_dev->dev, &dev_attr_lm3533_bl_onoff);
+	device_remove_file(&i2c_dev->dev, &dev_attr_lm3533_bl_maxcurrent);
 
 	led_classdev_unregister(dev->led);
 
@@ -559,7 +634,7 @@ static void lm3533_bl_shutdown(struct i2c_client *i2c_dev)
 
 static struct i2c_driver lm3533_driver = {
 	.driver		= {
-		.name	= I2C_BL_NAME,
+		.name	= DRIVER_NAME,
 		.owner	= THIS_MODULE,
 	},
 	.probe		= lm3533_bl_probe,
