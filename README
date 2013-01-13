@@ -1,0 +1,9 @@
+Edit build.sh so that KERNEL_SOURCES points at the extracted kernel sources
+from LGP880(X3)_Android_ICS_V10a.zip.
+It can be downloaded from:
+http://www.lg.com/lgecs.downloadFile.ldwf?OPENSOURCE_FILE_NAME=LGP880%28X3%29_Android_ICS_V10a.zip&OPENSOURCE_ORIGINAL_NAME=opensourceWWZ%2FLGP880%28X3%29_Android_ICS_V10a.zip&detailCustomerModelCode=LGP880&DownFileType=opensource
+
+Run as root on phone:
+echo 1-0036 >/sys/bus/i2c/drivers/lm3533_bl/unbind
+insmod lm3533_bl_custom.ko
+echo 1-0036 >/sys/bus/i2c/drivers/lm3533_bl_custom/bind
